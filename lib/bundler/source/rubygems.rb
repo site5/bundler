@@ -6,7 +6,7 @@ module Bundler
   module Source
     # TODO: Refactor this class
     class Rubygems
-      API_REQUEST_LIMIT = 100 # threshold for switching back to the modern index instead of fetching every spec
+      API_REQUEST_LIMIT = 300 # threshold for switching back to the modern index instead of fetching every spec
 
       attr_reader :remotes, :caches
       attr_accessor :dependency_names
