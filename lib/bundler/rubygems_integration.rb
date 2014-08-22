@@ -93,6 +93,10 @@ module Bundler
       Gem.path
     end
 
+    def gem_cache
+      gem_path.map{|p| File.expand_path("cache", p) }
+    end
+
     def spec_cache_dirs
       @spec_cache_dirs ||= begin
         dirs = gem_path.map {|dir| File.join(dir, 'specifications')}
@@ -103,6 +107,14 @@ module Bundler
 
     def marshal_spec_dir
       Gem::MARSHAL_SPEC_DIR
+    end
+
+    def config_map
+      Gem::ConfigMap
+    end
+
+    def repository_subdirectories
+      %w[cache doc gems specifications]
     end
 
     def clear_paths
@@ -160,7 +172,7 @@ module Bundler
 
     def spec_from_gem(path, policy = nil)
       require 'rubygems/security'
-      gem_from_path(path, Gem::Security::Policies[policy]).spec
+      gem_from_path(path, security_policies[policy]).spec
     rescue Gem::Package::FormatError
       raise GemspecError, "Could not read gem at #{path}. It may be corrupted."
     rescue Exception, Gem::Exception, Gem::Security::Exception => e
@@ -188,6 +200,10 @@ module Bundler
       uri = Bundler::Source.mirror_for(uri)
       fetcher = Gem::RemoteFetcher.new(configuration[:http_proxy])
       fetcher.download(spec, uri, path)
+    end
+
+    def security_policy_keys
+      %w{High Medium Low AlmostNo No}.map { |level| "#{level}Security" }
     end
 
     def security_policies
@@ -533,6 +549,9 @@ module Bundler
         Gem::Package.build(spec, skip_validation)
       end
 
+      def repository_subdirectories
+        Gem::REPOSITORY_SUBDIRECTORIES
+      end
     end
 
   end

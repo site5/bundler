@@ -145,6 +145,42 @@ describe "bundle clean" do
     expect(vendored_gems("cache/bundler/git/foo-1.0-#{digest}")).to exist
   end
 
+  it "removes unused svn gems" do
+    build_svn "foo", :path => lib_path("foo")
+    svn_path = lib_path('foo')
+    revision = 1
+
+    gemfile <<-G
+      source "file://#{gem_repo1}"
+
+      gem "rack", "1.0.0"
+      svn "file://#{svn_path}", :ref => "#{revision}" do
+        gem "foo"
+      end
+    G
+
+    bundle "install --path vendor/bundle"
+
+    gemfile <<-G
+      source "file://#{gem_repo1}"
+
+      gem "rack", "1.0.0"
+    G
+    bundle "install"
+
+    bundle :clean
+
+    expect(out).to eq("Removing foo (#{revision})")
+
+    expect(vendored_gems("gems/rack-1.0.0")).to exist
+    expect(vendored_gems("bundler/gems/foo-#{revision}")).not_to exist
+    expect(vendored_gems("cache/bundler/svn/foo-#{revision}")).not_to exist
+
+    expect(vendored_gems("specifications/rack-1.0.0.gemspec")).to exist
+
+    expect(vendored_gems("bin/rackup")).to exist
+  end
+
   it "removes unused git gems" do
     build_git "foo", :path => lib_path("foo")
     git_path = lib_path('foo')
@@ -284,7 +320,7 @@ describe "bundle clean" do
     bundle :clean, :exitstatus => true
 
     expect(exitstatus).to eq(1)
-    expect(out).to eq("Can only use bundle clean when --path is set or --force is set")
+    expect(out).to include("--force")
   end
 
   # handling bundle clean upgrade path from the pre's
@@ -588,5 +624,29 @@ describe "bundle clean" do
     should_not_have_gems 'foo-1.0'
 
     expect(vendored_gems("bin/rackup")).to exist
+  end
+
+  it "performs an automatic bundle install" do
+    gemfile <<-G
+      source "file://#{gem_repo1}"
+
+      gem "thin"
+      gem "foo"
+    G
+
+    bundle "install --path vendor/bundle --no-clean"
+
+    gemfile <<-G
+      source "file://#{gem_repo1}"
+
+      gem "thin"
+      gem "weakling"
+    G
+
+    bundle "config auto_install 1"
+    bundle :clean
+    expect(out).to include('Installing weakling 0.0.3')
+    should_have_gems 'thin-1.0', 'rack-1.0.0', 'weakling-0.0.3'
+    should_not_have_gems 'foo-1.0'
   end
 end

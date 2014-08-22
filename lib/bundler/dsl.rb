@@ -18,11 +18,13 @@ module Bundler
     def initialize
       @source          = nil
       @sources         = []
+      @git_sources     = {}
       @dependencies    = []
       @groups          = []
       @platforms       = []
       @env             = nil
       @ruby_version    = nil
+      add_git_sources
     end
 
     def rubygems_source
@@ -71,11 +73,14 @@ module Bundler
       if name.is_a?(Symbol)
         raise GemfileError, %{You need to specify gem names as Strings. Use 'gem "#{name.to_s}"' instead.}
       end
+      if name =~ /\s/
+        raise GemfileError, %{'#{name}' is not a valid gem name because it contains whitespace.}
+      end
 
-      options = Hash === args.last ? args.pop.dup : {}
+      options = args.last.is_a?(Hash) ? args.pop.dup : {}
       version = args
 
-      _normalize_options(name, version, options)
+      normalize_options(name, version, options)
 
       dep = Dependency.new(name, version, options)
 
@@ -139,8 +144,21 @@ module Bundler
       @source = nil
     end
 
+    def git_source(name, &block)
+      unless block_given?
+        raise InvalidOption, "You need to pass a block to #git_source"
+      end
+
+      if valid_keys.include?(name.to_s)
+        raise InvalidOption, "You cannot use #{name} as a git source. It " \
+          "is a reserved key. Reserved keys are: #{valid_keys.join(", ")}"
+      end
+
+      @git_sources[name.to_s] = block
+    end
+
     def path(path, options = {}, source_options = {}, &blk)
-      source Source::Path.new(_normalize_hash(options).merge("path" => Pathname.new(path))), source_options, &blk
+      source Source::Path.new(normalize_hash(options).merge("path" => Pathname.new(path))), source_options, &blk
     end
 
     def git(uri, options = {}, source_options = {}, &blk)
@@ -155,7 +173,19 @@ module Bundler
         raise DeprecatedError, msg
       end
 
-      source Source::Git.new(_normalize_hash(options).merge("uri" => uri)), source_options, &blk
+      source Source::Git.new(normalize_hash(options).merge("uri" => uri)), source_options, &blk
+    end
+
+    def svn(uri, options = {}, source_options = {}, &blk)
+      unless block_given?
+        msg = "You can no longer specify a svn source by itself. Instead, \n" \
+              "either use the :svn option on a gem, or specify the gems that \n" \
+              "bundler should find in the svn source by passing a block to \n" \
+              "the svn method."
+        raise DeprecatedError, msg
+      end
+
+      source Source::SVN.new(normalize_hash(options).merge("uri" => uri)), source_options, &blk
     end
 
     def to_definition(lockfile, unlock)
@@ -193,30 +223,45 @@ module Bundler
 
   private
 
-    def _normalize_hash(opts)
-      # Cannot modify a hash during an iteration in 1.9
+    def add_git_sources
+      git_source(:github) do |repo_name|
+        repo_name = "#{repo_name}/#{repo_name}" unless repo_name.include?("/")
+        "git://github.com/#{repo_name}.git"
+      end
+
+      git_source(:gist){ |repo_name| "https://gist.github.com/#{repo_name}.git" }
+
+      git_source(:bitbucket) do |repo_name|
+        user_name, repo_name = repo_name.split '/'
+        repo_name ||= user_name
+        "https://#{user_name}@bitbucket.org/#{user_name}/#{repo_name}.git"
+      end
+    end
+
+    def normalize_hash(opts)
       opts.keys.each do |k|
-        next if String === k
-        v = opts[k]
-        opts.delete(k)
-        opts[k.to_s] = v
+        opts[k.to_s] = opts.delete(k) unless k.is_a?(String)
       end
       opts
     end
 
-    def _normalize_options(name, version, opts)
-      _normalize_hash(opts)
+    def valid_keys
+      @valid_keys ||= %w(group groups git svn path name branch ref tag require submodules platform platforms type)
+    end
 
-      valid_keys = %w(group groups git gist github path name branch ref tag require submodules platform platforms type)
-      invalid_keys = opts.keys - valid_keys
+    def normalize_options(name, version, opts)
+      normalize_hash(opts)
+
+      git_names = @git_sources.keys.map(&:to_s)
+
+      invalid_keys = opts.keys - (valid_keys + git_names)
       if invalid_keys.any?
-        plural = invalid_keys.size > 1
         message = "You passed #{invalid_keys.map{|k| ':'+k }.join(", ")} "
-        if plural
-          message << "as options for gem '#{name}', but they are invalid."
-        else
-          message << "as an option for gem '#{name}', but it is invalid."
-        end
+        message << if invalid_keys.size > 1
+                     "as options for gem '#{name}', but they are invalid."
+                   else
+                     "as an option for gem '#{name}', but it is invalid."
+                   end
 
         message << " Valid options are: #{valid_keys.join(", ")}"
         raise InvalidOption, message
@@ -236,16 +281,12 @@ module Bundler
         raise GemfileError, "`#{p}` is not a valid platform. The available options are: #{VALID_PLATFORMS.inspect}"
       end
 
-      if github = opts.delete("github")
-        github = "#{github}/#{github}" unless github.include?("/")
-        opts["git"] = "git://github.com/#{github}.git"
+      git_name = (git_names & opts.keys).last
+      if @git_sources[git_name]
+        opts["git"] = @git_sources[git_name].call(opts[git_name])
       end
 
-      if gist = opts.delete("gist")
-        opts["git"] = "https://gist.github.com/#{gist}.git"
-      end
-
-      ["git", "path"].each do |type|
+      ["git", "path", "svn"].each do |type|
         if param = opts[type]
           if version.first && version.first =~ /^\s*=?\s*(\d[^\s]*)\s*$/
             options = opts.merge("name" => name, "version" => $1)

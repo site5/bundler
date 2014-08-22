@@ -1,16 +1,122 @@
-## 1.6.0
+## 1.8.0 (unreleased)
+
+Features:
+
+  - add support for SVN sources (@msnexploder)
+  - add metadata allowed_push_host to new gem template (#3002, @juanitofatas)
+  - adds a `--no-install` flag to `bundle package`
+  - add `bundle viz --without` to exclude gem groups from resulting graph (@fnichol)
+  - add support for private S3 sources (@tryba)
+  - prevent whitespace in gem declarations with clear messaging
+
+## 1.7.0 (2014-08-13)
+
+Security:
+
+  - Fix for CVE-2013-0334, installing gems from an unexpected source (@tmoore)
+
+Features:
+
+  - Gemfile `source` calls now take a block containing gems from that source (@tmoore)
+  - added the `:source` option to `gem` to specify a source (@tmoore)
 
 Bugfixes:
 
-  - many Gemfiles that had incorrect errors now resolve correctly (@Who828)
+  - warn on ambiguous gems available from more than one source (@tmoore)
+
+## 1.6.5 (2014-07-23)
+
+Bugfixes:
+
+  - require openssl explicitly to fix rare HTTPS request failures (@indirect, #3107)
+
+## 1.6.4 (2014-07-17)
+
+Bugfixes:
+
+  - fix undefined constant error when can't find gem during binstubs (#3095, @jetaggart)
+  - work when installed git gems are not writable (#3092, @pmahoney)
+  - don't store configured source credentials in Gemfile.lock (#3045, @lhz)
+  - don't include config source credentials in the lockfile (Lars Haugseth)
+  - use threads for jobs on Rubinius (@YorickPeterse)
+  - skip dependencies from other platforms (@mvz)
+  - work when Rubygems was built without SSL (@andremedeiros)
+
+## 1.6.3 (2014-06-16)
+
+Bugfixes:
+
+  - fix regression when resolving many conflicts (#2994, @Who828)
+  - use local gemspec for builtin gems during install --local (#3041, @Who828)
+  - don't warn about sudo when installing on Windows (#2984, @indirect)
+  - shell escape `bundle open` arguments (@indirect)
+
+## 1.6.2 (2014-04-13)
+
+Bugfixes:
+
+  - fix an exception when using builtin gems (#2915, #2963, @gnufied)
+  - cache gems that are built in to the running ruby (#2975, @indirect)
+  - re-allow deploying cached git gems without git installed (#2968, @aughr)
+  - keep standalone working even with builtin gems (@indirect)
+  - don't update vendor/cache in deployment mode (#2921, @indirect)
+
+Features:
+
+  - warn informatively when `bundle install` is run as root (#2936, @1337807)
+
+## 1.6.1 (2014-04-02)
+
+Bugfixes:
+
+  - update C extensions when git gem versions change (#2948, @dylanahsmith)
+
+Features:
+
+  - add support for C extensions in sudo mode on Rubygems 2.2
+
+## 1.6.0 (2014-03-28)
+
+Bugfixes:
+
+  - many Gemfiles that caused incorrect errors now resolve correctly (@Who828)
+  - redirects across hosts now work on rubies without OpenSSL (#2686, @grddev)
+  - gemspecs now handle filenames with newlines (#2634, @jasonmp85)
+  - support escaped characters in usernames and passwords (@punkie)
+  - no more exception on `update GEM` without lock file (@simi)
+  - allow long config values (#2823, @kgrz)
+  - cache successfully even locked to gems shipped with Ruby (#2869, @aughr)
+  - respect NO_PROXY even if a proxy is configured (#2878, @stlay)
+  - only retry git commands that hit the network (#2899, @timmoore)
+  - fix NameError regression when OpenSSL is not available (#2898, @timmoore)
+  - handle exception installing when build_info owned by root (@Who828)
+  - skip HTTP redirects from rubygems.org, huge speed boost (@Who828)
 
 Features:
 
   - resolver rewritten to avoid recursion (@Who828)
+  - add `git_source` for custom options like :github and :gist (@strzalek)
+  - HTTP auth may now be stored in `bundle config` (@smashwilson)
   - some complex Gemfiles are resolved up to 10x faster (@Who828)
   - add support for IRB alternatives such as Pry and Ripl (@joallard, @postmodern)
   - highlight installed or updated gems (#2722, #2741, @yaotti, @simi)
-  - display post_install_message's for gems installed via :git (@phallstrom)
+  - display the `post_install_message` for gems installed via :git (@phallstrom)
+  - `bundle outdated --strict` now only reports allowed updates (@davidblondeau)
+  - `bundle show --verbose` Add gem summary to the output (@lardcanoe)
+  - `bundle gem GEM --ext` now generates a skeleton for a C extension (@superdealloc)
+  - Avoid using threequals operator where possible (@as-cii)
+  - Add `bundle update --group` to update specific group (#2731 @banyan)
+
+Documentation:
+
+  - Add missing switches for bundle-install(1) and bundle-update(1) (@as-cii)
+
+## 1.5.3 (2014-02-06)
+
+Bugfixes:
+
+  - find "missing" gems that are actually present (#2780, #2818, #2854)
+  - use n-1 cores when given n jobs for parallel install (@jdickey)
 
 ## 1.5.2 (2014-01-10)
 
@@ -56,7 +162,7 @@ Features:
 
   - bundle update also accepts --jobs (#2692, @mrkn)
   - add fork URL to README for new `bundle gem` (#2665, @zzak)
-  - add `bundle outdated --strict` (#2685, @rhysd)
+  - add `bundle outdated --strict` (#2685, @davidblondeau)
   - warn if same gem/version is added twice (#2679, @jendiamond)
   - don't redownload installed specs for `bundle install` (#2680, @cainlevy)
   - override gem sources with mirrors (#2650, @danielsdeleo, @mkristian)

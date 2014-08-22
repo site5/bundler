@@ -129,6 +129,17 @@ describe "bundle outdated" do
       expect(out).to_not include("activesupport (3.0 > 2.3.5) Gemfile specifies \"= 2.3.5\"")
       expect(out).to include("weakling (0.0.5 > 0.0.3) Gemfile specifies \"~> 0.0.1\"")
     end
+
+    it "only reports gem dependencies when they can actually be updated" do
+      install_gemfile <<-G
+        source "file://#{gem_repo2}"
+        gem "rack_middleware", "1.0"
+      G
+
+      bundle "outdated --strict"
+
+      expect(out).to_not include("rack (1.2 > 0.9.1)")
+    end
   end
 
   describe "with invalid gem name" do
@@ -141,5 +152,17 @@ describe "bundle outdated" do
       bundle "outdated invalid_gem_name", :exitstatus => true
       expect(exitstatus).to_not be_zero
     end
+  end
+
+  it "performs an automatic bundle install" do
+    gemfile <<-G
+      source "file://#{gem_repo1}"
+      gem "rack", "0.9.1"
+      gem "foo"
+    G
+
+    bundle "config auto_install 1"
+    bundle :outdated
+    expect(out).to include("Installing foo 1.0")
   end
 end

@@ -45,6 +45,15 @@ module Gem
       end
     end
 
+    if method_defined?(:extension_dir)
+      alias_method :rg_extension_dir, :extension_dir
+      def extension_dir
+        @extension_dir ||= source.respond_to?(:extension_dir_name) ?
+          File.expand_path(File.join(extensions_dir, source.extension_dir_name)) :
+          rg_extension_dir
+      end
+    end
+
     # RubyGems 1.8+ used only.
     remove_method :gem_dir if instance_methods(false).include?(:gem_dir)
     def gem_dir
@@ -55,9 +64,12 @@ module Gem
       @groups ||= []
     end
 
-    def git_version
-      return unless loaded_from && source.is_a?(Bundler::Source::Git)
-      " #{source.revision[0..6]}"
+    def scm_version
+      return unless loaded_from
+      case source
+      when Bundler::Source::Git then " #{source.revision[0..6]}"
+      when Bundler::Source::SVN then " #{source.revision}"
+      end
     end
 
     def to_gemfile(path = nil)
@@ -138,6 +150,7 @@ module Gem
   class Platform
     JAVA  = Gem::Platform.new('java') unless defined?(JAVA)
     MSWIN = Gem::Platform.new('mswin32') unless defined?(MSWIN)
+    MSWIN64 = Gem::Platform.new('mswin64') unless defined?(MSWIN64)
     MINGW = Gem::Platform.new('x86-mingw32') unless defined?(MINGW)
     X64_MINGW = Gem::Platform.new('x64-mingw32') unless defined?(X64_MINGW)
 

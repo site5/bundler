@@ -306,4 +306,62 @@ describe "bundle exec" do
       end
     end
   end
+
+  describe "from gems bundled via :svn" do
+    before(:each) do
+      build_svn "fizz_svn" do |s|
+        s.executables = "fizz_svn"
+      end
+
+      install_gemfile <<-G
+        gem "fizz_svn", :svn => "file://#{lib_path('fizz_svn-1.0')}"
+      G
+    end
+
+    it "works when unlocked" do
+      bundle "exec fizz_svn"
+      expect(out).to eq("1.0")
+    end
+
+    it "works when locked" do
+      should_be_locked
+      bundle "exec fizz_svn"
+      expect(out).to eq("1.0")
+    end
+  end
+
+  describe "from gems bundled via :svn with no gemspec" do
+    before(:each) do
+      build_svn "fizz_no_gemspec", :gemspec => false do |s|
+        s.executables = "fizz_no_gemspec"
+      end
+
+      install_gemfile <<-G
+        gem "fizz_no_gemspec", "1.0", :svn => "file://#{lib_path('fizz_no_gemspec-1.0')}"
+      G
+    end
+
+    it "works when unlocked" do
+      bundle "exec fizz_no_gemspec"
+      expect(out).to eq("1.0")
+    end
+
+    it "works when locked" do
+      should_be_locked
+      bundle "exec fizz_no_gemspec"
+      expect(out).to eq("1.0")
+    end
+  end
+
+  it "performs an automatic bundle install" do
+    gemfile <<-G
+      source "file://#{gem_repo1}"
+      gem "rack", "0.9.1"
+      gem "foo"
+    G
+
+    bundle "config auto_install 1"
+    bundle "exec rackup"
+    expect(out).to include("Installing foo 1.0")
+  end
 end

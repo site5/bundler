@@ -53,6 +53,8 @@ describe "bundle gem" do
       expect(bundled_app("test_gem/Rakefile")).to exist
       expect(bundled_app("test_gem/lib/test_gem.rb")).to exist
       expect(bundled_app("test_gem/lib/test_gem/version.rb")).to exist
+      expect(bundled_app("test_gem/.gitignore")).to exist
+      expect(bundled_app("test_gem/.consolerc")).to exist
     end
 
     it "starts with version 0.0.1" do
@@ -76,6 +78,11 @@ describe "bundle gem" do
       end
 
       it_should_behave_like "git config is absent"
+    end
+
+    it "sets gemspec metadata['allowed_push_host']", :rubygems => "2.0" do
+      expect(generated_gem.gemspec.metadata['allowed_push_host']).
+        to match("delete to allow pushes to any server")
     end
 
     it "sets gemspec license to MIT by default" do
@@ -150,11 +157,11 @@ describe "bundle gem" do
       end
 
       it "requires 'test-gem'" do
-        expect(bundled_app("test_gem/spec/spec_helper.rb").read).to match(/require 'test_gem'/)
+        expect(bundled_app("test_gem/spec/spec_helper.rb").read).to include("require 'test_gem'")
       end
 
       it "creates a default test which fails" do
-        expect(bundled_app("test_gem/spec/test_gem_spec.rb").read).to include('expect(false).to be true')
+        expect(bundled_app("test_gem/spec/test_gem_spec.rb").read).to include("expect(false).to eq(true)")
       end
     end
 
@@ -171,15 +178,15 @@ describe "bundle gem" do
       end
 
       it "requires 'test-gem'" do
-        expect(bundled_app("test_gem/test/minitest_helper.rb").read).to match(/require 'test_gem'/)
+        expect(bundled_app("test_gem/test/minitest_helper.rb").read).to include("require 'test_gem'")
       end
 
       it "requires 'minitest_helper'" do
-        expect(bundled_app("test_gem/test/test_test_gem.rb").read).to match(/require 'minitest_helper'/)
+        expect(bundled_app("test_gem/test/test_test_gem.rb").read).to include("require 'minitest_helper'")
       end
 
       it "creates a default test which fails" do
-        expect(bundled_app("test_gem/test/test_test_gem.rb").read).to match(/assert false/)
+        expect(bundled_app("test_gem/test/test_test_gem.rb").read).to include("assert false")
       end
     end
 
@@ -254,6 +261,11 @@ describe "bundle gem" do
       it_should_behave_like "git config is absent"
     end
 
+    it "sets gemspec metadata['allowed_push_host']", :rubygems => "2.0" do
+      expect(generated_gem.gemspec.metadata['allowed_push_host']).
+        to match("delete to allow pushes to any server")
+    end
+
     it "sets gemspec license to MIT by default" do
       expect(generated_gem.gemspec.license).to eq("MIT")
     end
@@ -326,11 +338,11 @@ describe "bundle gem" do
       end
 
       it "requires 'test/gem'" do
-        expect(bundled_app("test-gem/spec/spec_helper.rb").read).to match(/require 'test\/gem'/)
+        expect(bundled_app("test-gem/spec/spec_helper.rb").read).to include("require 'test/gem'")
       end
 
       it "creates a default test which fails" do
-        expect(bundled_app("test-gem/spec/test/gem_spec.rb").read).to include('expect(false).to be true')
+        expect(bundled_app("test-gem/spec/test/gem_spec.rb").read).to include("expect(false).to eq(true)")
       end
 
       it "creates a default rake task to run the specs" do
@@ -341,6 +353,7 @@ describe "bundle gem" do
           RSpec::Core::RakeTask.new(:spec)
 
           task :default => :spec
+
         RAKEFILE
 
         expect(bundled_app("test-gem/Rakefile").read).to eq(rakefile)
@@ -381,6 +394,7 @@ describe "bundle gem" do
           end
 
           task :default => :test
+
         RAKEFILE
 
         expect(bundled_app("test-gem/Rakefile").read).to eq(rakefile)
@@ -397,6 +411,40 @@ describe "bundle gem" do
       it "defaults to rspec" do
         expect(bundled_app("test-gem/spec/spec_helper.rb")).to exist
         expect(bundled_app("test-gem/test/minitest_helper.rb")).to_not exist
+      end
+    end
+
+    context "--ext parameter set" do
+      before do
+        reset!
+        in_app_root
+        bundle "gem test_gem --ext"
+      end
+
+      it "builds ext skeleton" do
+        expect(bundled_app("test_gem/ext/test_gem/extconf.rb")).to exist
+        expect(bundled_app("test_gem/ext/test_gem/test_gem.h")).to exist
+        expect(bundled_app("test_gem/ext/test_gem/test_gem.c")).to exist
+      end
+
+      it "includes rake-compiler" do
+        expect(bundled_app("test_gem/test_gem.gemspec").read).to include('spec.add_development_dependency "rake-compiler"')
+      end
+
+      it "depends on compile task for build" do
+        rakefile = strip_whitespace <<-RAKEFILE
+          require "bundler/gem_tasks"
+
+          require "rake/extensiontask"
+
+          task :build => :compile
+
+          Rake::ExtensionTask.new("test_gem") do |ext|
+            ext.lib_dir = "lib/test_gem"
+          end
+        RAKEFILE
+
+        expect(bundled_app("test_gem/Rakefile").read).to eq(rakefile)
       end
     end
   end

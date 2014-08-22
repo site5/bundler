@@ -1,12 +1,21 @@
 $:.unshift File.expand_path('..', __FILE__)
 $:.unshift File.expand_path('../../lib', __FILE__)
-require 'rspec'
+
 require 'bundler/psyched_yaml'
 require 'fileutils'
-require 'rubygems'
-require 'bundler'
 require 'uri'
 require 'digest/sha1'
+
+begin
+  require 'rubygems'
+  spec = Gem::Specification.load("bundler.gemspec")
+  gem 'rspec', spec.dependencies.last.requirement.to_s
+  require 'rspec'
+rescue LoadError
+  abort "Run rake spec:deps to install development dependencies"
+end
+
+require 'bundler'
 
 # Require the correct version of popen for the current platform
 if RbConfig::CONFIG['host_os'] =~ /mingw|mswin/
@@ -45,7 +54,7 @@ RSpec.configure do |config|
   config.include Spec::Sudo
   config.include Spec::Permissions
 
-  if Spec::Sudo.test_sudo?
+  if ENV['BUNDLER_SUDO_TESTS'] && Spec::Sudo.present?
     config.filter_run :sudo => true
   else
     config.filter_run_excluding :sudo => true
@@ -57,11 +66,8 @@ RSpec.configure do |config|
     config.filter_run_excluding :realworld => true
   end
 
-  if RUBY_VERSION >= "1.9"
-    config.filter_run_excluding :ruby => "1.8"
-  else
-    config.filter_run_excluding :ruby => "1.9"
-  end
+  config.filter_run_excluding :ruby => LessThanProc.with(RUBY_VERSION)
+  config.filter_run_excluding :rubygems => LessThanProc.with(Gem::VERSION)
 
   config.filter_run :focused => true unless ENV['CI']
   config.run_all_when_everything_filtered = true
@@ -94,15 +100,15 @@ RSpec.configure do |config|
 
     Dir.chdir(original_wd)
     # Reset ENV
-    ENV['PATH']           = original_path
-    ENV['GEM_HOME']       = original_gem_home
-    ENV['GEM_PATH']       = original_gem_home
-    ENV['BUNDLE_PATH']    = nil
-    ENV['BUNDLE_GEMFILE'] = nil
-    ENV['BUNDLER_TEST']   = nil
-    ENV['BUNDLE_FROZEN']  = nil
+    ENV['PATH']                  = original_path
+    ENV['GEM_HOME']              = original_gem_home
+    ENV['GEM_PATH']              = original_gem_home
+    ENV['BUNDLE_PATH']           = nil
+    ENV['BUNDLE_GEMFILE']        = nil
+    ENV['BUNDLE_FROZEN']         = nil
+    ENV['BUNDLE_APP_CONFIG']     = nil
+    ENV['BUNDLER_TEST']          = nil
     ENV['BUNDLER_SPEC_PLATFORM'] = nil
     ENV['BUNDLER_SPEC_VERSION']  = nil
-    ENV['BUNDLE_APP_CONFIG']     = nil
   end
 end

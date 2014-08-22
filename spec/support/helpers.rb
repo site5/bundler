@@ -4,10 +4,10 @@ module Spec
       @in_p, @out_p, @err_p = nil, nil, nil
       Dir["#{tmp}/{gems/*,*}"].each do |dir|
         next if %(base remote1 gems rubygems).include?(File.basename(dir))
-        unless ENV['BUNDLER_SUDO_TESTS']
-          FileUtils.rm_rf(dir)
-        else
+        if ENV['BUNDLER_SUDO_TESTS']
           `sudo rm -rf #{dir}`
+        else
+          FileUtils.rm_rf(dir)
         end
       end
       FileUtils.mkdir_p(tmp)
@@ -58,6 +58,7 @@ module Spec
     def bundle(cmd, options = {})
       expect_err = options.delete(:expect_err)
       exitstatus = options.delete(:exitstatus)
+      sudo       = "sudo" if options.delete(:sudo)
       options["no-color"] = true unless options.key?("no-color") || %w(exec conf).include?(cmd.to_s[0..3])
 
       bundle_bin = File.expand_path('../../../bin/bundle', __FILE__)
@@ -67,12 +68,12 @@ module Spec
       requires << File.expand_path('../artifice/'+options.delete(:artifice)+'.rb', __FILE__) if options.key?(:artifice)
       requires_str = requires.map{|r| "-r#{r}"}.join(" ")
 
-      env = (options.delete(:env) || {}).map{|k,v| "#{k}='#{v}' "}.join
+      env = (options.delete(:env) || {}).map{|k,v| "#{k}='#{v}'"}.join(" ")
       args = options.map do |k,v|
         v == true ? " --#{k}" : " --#{k} #{v}" if v
       end.join
 
-      cmd = "#{env}#{Gem.ruby} -I#{lib} #{requires_str} #{bundle_bin} #{cmd}#{args}"
+      cmd = "#{env} #{sudo} #{Gem.ruby} -I#{lib} #{requires_str} #{bundle_bin} #{cmd}#{args}"
 
       if exitstatus
         sys_status(cmd)
@@ -162,9 +163,9 @@ module Spec
       config
     end
 
-    def gemfile(*args)
-      path = bundled_app("Gemfile")
-      path = args.shift if Pathname === args.first
+    def create_file(*args)
+      path = bundled_app(args.shift)
+      path = args.shift if args.first.is_a?(Pathname)
       str  = args.shift || ""
       path.dirname.mkpath
       File.open(path.to_s, 'w') do |f|
@@ -172,13 +173,16 @@ module Spec
       end
     end
 
+    def gemfile(*args)
+      create_file("Gemfile", *args)
+    end
+
     def lockfile(*args)
-      path = bundled_app("Gemfile.lock")
-      path = args.shift if Pathname === args.first
-      str  = args.shift || ""
-      File.open(path.to_s, 'w') do |f|
-        f.puts strip_whitespace(str)
-      end
+      create_file("Gemfile.lock", *args)
+    end
+
+    def consolerc(*args)
+      create_file(".consolerc", *args)
     end
 
     def strip_whitespace(str)
@@ -328,6 +332,31 @@ module Spec
 
     def revision_for(path)
       Dir.chdir(path) { `git rev-parse HEAD`.strip }
+    end
+
+    def capture_output
+      fake_stdout = StringIO.new
+      actual_stdout = $stdout
+      $stdout = fake_stdout
+      yield
+      fake_stdout.rewind
+      fake_stdout.read
+    ensure
+      $stdout = actual_stdout
+    end
+
+    def with_read_only(pattern)
+      chmod = lambda do |dirmode, filemode|
+        lambda do |f|
+          mode = File.directory?(f) ? dirmode : filemode
+          File.chmod(mode, f)
+        end
+      end
+
+      Dir[pattern].each(&chmod[0555, 0444])
+      yield
+    ensure
+      Dir[pattern].each(&chmod[0755, 0644])
     end
   end
 end

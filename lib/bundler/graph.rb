@@ -3,12 +3,13 @@ module Bundler
   class Graph
     GRAPH_NAME = :Gemfile
 
-    def initialize(env, output_file, show_version = false, show_requirements = false, output_format = "png")
+    def initialize(env, output_file, show_version = false, show_requirements = false, output_format = "png", without = [])
       @env               = env
       @output_file       = output_file
       @show_version      = show_version
       @show_requirements = show_requirements
       @output_format     = output_format
+      @without_groups    = without.map(&:to_sym)
 
       @groups            = []
       @relations         = Hash.new {|h, k| h[k] = Set.new}
@@ -53,6 +54,8 @@ module Bundler
       relations = Hash.new {|h, k| h[k] = Set.new}
       @env.current_dependencies.each do |dependency|
         dependency.groups.each do |group|
+          next if @without_groups.include?(group)
+
           relations[group.to_s].add(dependency)
           @relations[group.to_s].add(dependency.name)
 
@@ -91,7 +94,7 @@ module Bundler
       Gem::Dependency.class_eval do
         def matching_specs platform_only = false
           matches = Bundler.load.specs.select { |spec|
-            self.name === spec.name and # TODO: == instead of ===
+            self.name == spec.name and
               requirement.satisfied_by? spec.version
           }
 

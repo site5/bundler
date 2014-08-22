@@ -2,10 +2,12 @@ module Bundler
   class CLI::Install
     attr_reader :options
     def initialize(options)
-      @options = options
+      @options = options.dup
     end
 
     def run
+      warn_if_root
+
       if options[:without]
         options[:without] = options[:without].map{|g| g.tr(' ', ':') }
       end
@@ -53,8 +55,6 @@ module Bundler
         options[:system] = true
       end
 
-      options["no-cache"] ||= options[:local]
-
       Bundler.settings[:path]     = nil if options[:system]
       Bundler.settings[:path]     = "vendor/bundle" if options[:deployment]
       Bundler.settings[:path]     = options["path"] if options["path"]
@@ -64,6 +64,7 @@ module Bundler
       Bundler.settings[:shebang]  = options["shebang"] if options["shebang"]
       Bundler.settings[:jobs]     = options["jobs"] if options["jobs"]
       Bundler.settings[:no_prune] = true if options["no-prune"]
+      Bundler.settings[:no_install] = true if options["no-install"]
       Bundler.settings[:clean]    = options["clean"] if options["clean"]
       Bundler.settings.without    = options[:without]
       Bundler.ui.level            = "warn" if options[:quiet]
@@ -76,7 +77,7 @@ module Bundler
       definition = Bundler.definition
       definition.validate_ruby!
       Installer.install(Bundler.root, definition, options)
-      Bundler.load.cache if Bundler.root.join("vendor/cache").exist? && !options["no-cache"]
+      Bundler.load.cache if Bundler.root.join("vendor/cache").exist? && !options["no-cache"] && !Bundler.settings[:frozen]
 
       if Bundler.settings[:path]
         absolute_path = File.expand_path(Bundler.settings[:path])
@@ -114,6 +115,13 @@ module Bundler
     end
 
   private
+
+    def warn_if_root
+      return if Bundler::WINDOWS || !Process.uid.zero?
+      Bundler.ui.warn "Don't run Bundler as root. Bundler can ask for sudo " \
+        "if it is needed, and installing your bundle as root will break this " \
+        "application for all non-root users on this machine.", :wrap => true
+    end
 
     def without_groups_messages
       if Bundler.settings.without.any?

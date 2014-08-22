@@ -1,10 +1,10 @@
 # -*- encoding: utf-8 -*-
 $:.unshift File.expand_path("../lib", __FILE__)
-require 'rubygems'
 require 'shellwords'
 require 'benchmark'
 
 RUBYGEMS_REPO = File.expand_path("tmp/rubygems")
+BUNDLER_SPEC = Gem::Specification.load("bundler.gemspec")
 
 def safe_task(&block)
   yield
@@ -30,23 +30,43 @@ end
 namespace :spec do
   desc "Ensure spec dependencies are installed"
   task :deps do
-    {"rdiscount" => "~> 1.6", "ronn" => "~> 0.7.3", "rspec" => "~> 2.99.0.beta1"}.each do |name, version|
-      sh "#{Gem.ruby} -S gem list -i #{name} -v '#{version}' || " \
+    deps = Hash[BUNDLER_SPEC.development_dependencies.map do |d|
+      [d.name, d.requirement.to_s]
+    end]
+
+    # JRuby can't build ronn or rdiscount, so we skip that
+    if defined?(RUBY_ENGINE) && RUBY_ENGINE == 'jruby'
+      deps.delete("ronn")
+      deps.delete("rdiscount")
+    end
+
+    deps.each do |name, version|
+      sh "#{Gem.ruby} -S gem list -i '^#{name}$' -v '#{version}' || " \
          "#{Gem.ruby} -S gem install #{name} -v '#{version}' --no-ri --no-rdoc"
     end
+
+    # Download and install gems used inside tests
+    $LOAD_PATH.unshift("./spec")
+    require 'support/rubygems_ext'
+    Spec::Rubygems.setup
   end
 
   namespace :travis do
     task :deps do
       # Give the travis user a name so that git won't fatally error
-      system("sudo sed -i 's/1000::/1000:Travis:/g' /etc/passwd")
+      system "sudo sed -i 's/1000::/1000:Travis:/g' /etc/passwd"
       # Strip secure_path so that RVM paths transmit through sudo -E
-      system("sudo sed -i '/secure_path/d' /etc/sudoers")
+      system "sudo sed -i '/secure_path/d' /etc/sudoers"
       # Install groff for the ronn gem
-      system("sudo apt-get install groff -y")
-      # Downgrade Rubygems on 1.8 to avoid https://github.com/rubygems/rubygems/issues/784
+      sh "sudo apt-get install groff -y"
       if RUBY_VERSION < '1.9'
-        system("gem update --system 2.1.11")
+        # Downgrade Rubygems on 1.8 so Ronn can be required
+        # https://github.com/rubygems/rubygems/issues/784
+        sh "gem update --system 2.1.11"
+      else
+        # Downgrade Rubygems so RSpec 3 can be installed
+        # https://github.com/rubygems/rubygems/issues/813
+        sh "gem update --system 2.2.0"
       end
       # Install the other gem deps, etc.
       Rake::Task["spec:deps"].invoke
@@ -55,15 +75,12 @@ namespace :spec do
 end
 
 begin
-  # running the specs needs both rspec and ronn
+  rspec = BUNDLER_SPEC.development_dependencies.find{|d| d.name == "rspec" }
+  gem 'rspec', rspec.requirement.to_s
   require 'rspec/core/rake_task'
-  require 'ronn'
 
   desc "Run specs"
-  RSpec::Core::RakeTask.new do |t|
-    t.rspec_opts = %w(-fs --color)
-    t.ruby_opts  = %w(-w)
-  end
+  RSpec::Core::RakeTask.new
   task :spec => "man:build"
 
   namespace :spec do
@@ -95,11 +112,11 @@ begin
       rubyopt = ENV["RUBYOPT"]
       # When editing this list, also edit .travis.yml!
       branches = %w(master 2.2)
-      releases = %w(v1.3.6 v1.3.7 v1.4.2 v1.5.3 v1.6.2 v1.7.2 v1.8.29 v2.0.14 v2.1.11 v2.2.1)
+      releases = %w(v1.3.6 v1.3.7 v1.4.2 v1.5.3 v1.6.2 v1.7.2 v1.8.29 v2.0.14 v2.1.11 v2.2.2 v2.3.0)
       (branches + releases).each do |rg|
         desc "Run specs with Rubygems #{rg}"
         RSpec::Core::RakeTask.new(rg) do |t|
-          t.rspec_opts = %w(-fs --color)
+          t.rspec_opts = %w(--format documentation --color)
           t.ruby_opts  = %w(-w)
         end
 
@@ -111,7 +128,7 @@ begin
 
         task "clone_rubygems_#{rg}" do
           unless File.directory?("tmp/rubygems")
-            system("git clone git://github.com/rubygems/rubygems.git tmp/rubygems")
+            system("git clone https://github.com/rubygems/rubygems.git tmp/rubygems")
           end
           hash = nil
 
@@ -120,7 +137,7 @@ begin
             if rg == "master"
               system("git checkout origin/master")
             else
-              system("git checkout #{rg}")
+              system("git checkout #{rg}") || raise("Unknown Rubygems ref #{rg}")
             end
             hash = `git rev-parse HEAD`.chomp
           end
@@ -136,12 +153,14 @@ begin
 
       desc "Run specs under a Rubygems checkout (set RG=path)"
       RSpec::Core::RakeTask.new("co") do |t|
-        t.rspec_opts = %w(-fs --color)
+        t.rspec_opts = %w(--format documentation --color)
         t.ruby_opts  = %w(-w)
       end
 
       task "setup_co" do
-        ENV["RUBYOPT"] = "-I#{File.expand_path ENV['RG']} #{rubyopt}"
+        rg = File.expand_path ENV['RG']
+        puts "Running specs against Rubygems in #{rg}..."
+        ENV["RUBYOPT"] = "-I#{rg} #{rubyopt}"
       end
 
       task "co" => "setup_co"
@@ -219,8 +238,8 @@ begin
 
 rescue LoadError
   namespace :man do
-    task(:build) { abort "Install the ronn gem to be able to release!" }
-    task(:clean) { abort "Install the ronn gem to be able to release!" }
+    task(:build) { warn "Install the ronn gem to be able to release!" }
+    task(:clean) { warn "Install the ronn gem to be able to release!" }
   end
 end
 

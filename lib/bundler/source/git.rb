@@ -46,8 +46,12 @@ module Bundler
         out << "  specs:\n"
       end
 
+      def hash
+        [self.class, uri, ref, branch, name, version, submodules].hash
+      end
+
       def eql?(o)
-        Git === o            &&
+        o.is_a?(Git)         &&
         uri == o.uri         &&
         ref == o.ref         &&
         branch == o.branch   &&
@@ -79,16 +83,21 @@ module Bundler
       def install_path
         @install_path ||= begin
           git_scope = "#{base_name}-#{shortref_for_path(revision)}"
+          path = Bundler.install_path.join(git_scope)
 
-          if Bundler.requires_sudo?
+          if !path.exist? && Bundler.requires_sudo?
             Bundler.user_bundle_path.join(Bundler.ruby_scope).join(git_scope)
           else
-            Bundler.install_path.join(git_scope)
+            path
           end
         end
       end
 
       alias :path :install_path
+
+      def extension_dir_name
+        "#{base_name}-#{shortref_for_path(revision)}"
+      end
 
       def unlock!
         git_proxy.revision = nil
@@ -207,6 +216,10 @@ module Bundler
         git_proxy.revision
       end
 
+      def allow_git_ops?
+        @allow_remote || @allow_cached
+      end
+
     private
 
       def serialize_gemspecs_in(destination)
@@ -263,10 +276,6 @@ module Bundler
         Digest::SHA1.hexdigest(input)
       end
 
-      def allow_git_ops?
-        @allow_remote || @allow_cached
-      end
-
       def cached_revision
         options["revision"]
       end
@@ -276,7 +285,7 @@ module Bundler
       end
 
       def git_proxy
-        @git_proxy ||= GitProxy.new(cache_path, uri, ref, cached_revision){ allow_git_ops? }
+        @git_proxy ||= GitProxy.new(cache_path, uri, ref, cached_revision, self)
       end
 
     end

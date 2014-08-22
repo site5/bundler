@@ -18,7 +18,7 @@ module Bundler
     end
 
     # needed for standalone, load required_paths from local gemspec
-    # after the gem in installed
+    # after the gem is installed
     def require_paths
       if @remote_specification
         @remote_specification.require_paths
@@ -61,7 +61,7 @@ module Bundler
     end
 
     def _local_specification
-      eval(File.read(local_specification_path)) if @loaded_from && File.exists?(local_specification_path)
+      eval(File.read(local_specification_path)) if @loaded_from && File.exist?(local_specification_path)
     end
 
     def __swap__(spec)

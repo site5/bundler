@@ -54,7 +54,7 @@ module Bundler
       end
 
       def hash
-        self.class.hash
+        [self.class, expand(path), version].hash
       end
 
       def eql?(o)
@@ -78,6 +78,11 @@ module Bundler
         app_cache_path = app_cache_path(custom_path)
         return unless Bundler.settings[:cache_all]
         return if expand(@original_path).to_s.index(Bundler.root.to_s) == 0
+
+        unless @original_path.exist?
+          raise GemNotFound, "Can't cache gem #{version_message(spec)} because #{to_s} is missing!"
+        end
+
         FileUtils.rm_rf(app_cache_path)
         FileUtils.cp_r("#{@original_path}/.", app_cache_path)
         FileUtils.touch(app_cache_path.join(".bundlecache"))
@@ -146,7 +151,7 @@ module Bundler
               end
             end
           end
-        elsif File.exists?(expanded_path)
+        elsif File.exist?(expanded_path)
           raise PathError, "The path `#{expanded_path}` is not a directory."
         else
           raise PathError, "The path `#{expanded_path}` does not exist."

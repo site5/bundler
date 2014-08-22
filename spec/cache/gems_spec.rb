@@ -74,6 +74,51 @@ describe "bundle cache" do
     end
   end
 
+  describe "when there is a built-in gem", :ruby => "2.0" do
+    before :each do
+      build_repo2 do
+        build_gem "builtin_gem", "1.0.2"
+      end
+
+      build_gem "builtin_gem", "1.0.2", :to_system => true do |s|
+        s.summary = "This builtin_gem is bundled with Ruby"
+      end
+
+      FileUtils.rm("#{system_gem_path}/cache/builtin_gem-1.0.2.gem")
+    end
+
+    it "uses builtin gems" do
+      install_gemfile %|gem 'builtin_gem', '1.0.2'|
+      should_be_installed("builtin_gem 1.0.2")
+    end
+
+    it "caches remote and builtin gems" do
+      install_gemfile <<-G
+        source "file://#{gem_repo2}"
+        gem 'builtin_gem', '1.0.2'
+        gem 'rack', '1.0.0'
+      G
+
+      bundle :cache
+      expect(bundled_app("vendor/cache/rack-1.0.0.gem")).to exist
+      expect(bundled_app("vendor/cache/builtin_gem-1.0.2.gem")).to exist
+    end
+
+    it "doesn't make remote request after caching the gem" do
+      build_gem "builtin_gem_2", "1.0.2", :path => bundled_app('vendor/cache') do |s|
+        s.summary = "This builtin_gem is bundled with Ruby"
+      end
+
+      install_gemfile <<-G
+        source "file://#{gem_repo2}"
+        gem 'builtin_gem_2', '1.0.2'
+      G
+
+      bundle "install --local"
+      should_be_installed("builtin_gem_2 1.0.2")
+    end
+  end
+
   describe "when there are also git sources" do
     before do
       build_git "foo"
@@ -82,6 +127,38 @@ describe "bundle cache" do
       install_gemfile <<-G
         source "file://#{gem_repo1}"
         git "#{lib_path("foo-1.0")}" do
+          gem 'foo'
+        end
+        gem 'rack'
+      G
+    end
+
+    it "still works" do
+      bundle :cache
+
+      system_gems []
+      bundle "install --local"
+
+      should_be_installed("rack 1.0.0", "foo 1.0")
+    end
+
+    it "should not explode if the lockfile is not present" do
+      FileUtils.rm(bundled_app("Gemfile.lock"))
+
+      bundle :cache
+
+      expect(bundled_app("Gemfile.lock")).to exist
+    end
+  end
+
+  describe "when there are also svn sources" do
+    before do
+      build_svn "foo"
+      system_gems "rack-1.0.0"
+
+      install_gemfile <<-G
+        source "file://#{gem_repo1}"
+        svn "file://#{lib_path("foo-1.0")}" do
           gem 'foo'
         end
         gem 'rack'

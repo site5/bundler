@@ -4,9 +4,9 @@ require 'rubygems/spec_fetcher'
 
 module Bundler
   class Source
-    # TODO: Refactor this class
     class Rubygems < Source
-      API_REQUEST_LIMIT = 100 # threshold for switching back to the modern index instead of fetching every spec
+      API_REQUEST_LIMIT = 300 # threshold for switching back to the modern index instead of fetching every spec
+      S3_SCHEME = 's3'
 
       attr_reader :remotes, :caches
       attr_accessor :dependency_names
@@ -18,9 +18,7 @@ module Bundler
         @dependency_names = []
         @allow_remote = false
         @allow_cached = false
-
-        @caches = [ Bundler.app_cache ] +
-          Bundler.rubygems.gem_path.map{|p| File.expand_path("#{p}/cache") }
+        @caches = [Bundler.app_cache, *Bundler.rubygems.gem_cache]
       end
 
       def remote!
@@ -36,7 +34,7 @@ module Bundler
       end
 
       def eql?(o)
-        Rubygems === o
+        o.is_a?(Rubygems)
       end
 
       alias == eql?
@@ -53,7 +51,9 @@ module Bundler
 
       def to_lock
         out = "GEM\n"
-        out << remotes.map {|r| "  remote: #{r}\n" }.join
+        out << remotes.map { |remote|
+          "  remote: #{suppress_configured_credentials remote}\n"
+        }.join
         out << "  specs:\n"
       end
 
@@ -68,60 +68,85 @@ module Bundler
       end
 
       def install(spec)
-        if installed_specs[spec].any? && gem_dir_exists?(spec)
-          return ["Using #{version_message(spec)}", nil]
-        end
+        return ["Using #{version_message(spec)}", nil] if installed_specs[spec].any?
 
         # Download the gem to get the spec, because some specs that are returned
         # by rubygems.org are broken and wrong.
         if spec.source_uri
-          path = Fetcher.download_gem_from_uri(spec, spec.source_uri)
-          s = Bundler.rubygems.spec_from_gem(path, Bundler.settings["trust-policy"])
+          s = Bundler.rubygems.spec_from_gem(fetch_gem(spec), Bundler.settings["trust-policy"])
           spec.__swap__(s)
         end
 
-        path = cached_gem(spec)
-        if Bundler.requires_sudo?
-          install_path = Bundler.tmp
-          bin_path     = install_path.join("bin")
-        else
-          install_path = Bundler.rubygems.gem_dir
-          bin_path     = Bundler.system_bindir
-        end
-
-        installed_spec = nil
-        Bundler.rubygems.preserve_paths do
-          installed_spec = Bundler::GemInstaller.new(path,
-            :install_dir         => install_path.to_s,
-            :bin_dir             => bin_path.to_s,
-            :ignore_dependencies => true,
-            :wrappers            => true,
-            :env_shebang         => true
-          ).install
-        end
-
-        # SUDO HAX
-        if Bundler.requires_sudo?
-          Bundler.mkdir_p "#{Bundler.rubygems.gem_dir}/gems"
-          Bundler.mkdir_p "#{Bundler.rubygems.gem_dir}/specifications"
-          Bundler.sudo "cp -R #{Bundler.tmp}/gems/#{spec.full_name} #{Bundler.rubygems.gem_dir}/gems/"
-          Bundler.sudo "cp -R #{Bundler.tmp}/specifications/#{spec.full_name}.gemspec #{Bundler.rubygems.gem_dir}/specifications/"
-          spec.executables.each do |exe|
-            Bundler.mkdir_p Bundler.system_bindir
-            Bundler.sudo "cp -R #{Bundler.tmp}/bin/#{exe} #{Bundler.system_bindir}"
+        unless Bundler.settings[:no_install]
+          path = cached_gem(spec)
+          if Bundler.requires_sudo?
+            install_path = Bundler.tmp(spec.full_name)
+            bin_path     = install_path.join("bin")
+          else
+            install_path = Bundler.rubygems.gem_dir
+            bin_path     = Bundler.system_bindir
           end
+
+          installed_spec = nil
+          Bundler.rubygems.preserve_paths do
+            installed_spec = Bundler::GemInstaller.new(path,
+              :install_dir         => install_path.to_s,
+              :bin_dir             => bin_path.to_s,
+              :ignore_dependencies => true,
+              :wrappers            => true,
+              :env_shebang         => true
+            ).install
+          end
+
+          # SUDO HAX
+          if Bundler.requires_sudo?
+            Bundler.rubygems.repository_subdirectories.each do |name|
+              src = File.join(install_path, name, "*")
+              dst = File.join(Bundler.rubygems.gem_dir, name)
+              if name == "extensions" && Dir.glob(src).any?
+                src = File.join(src, "*/*")
+                ext_src = Dir.glob(src).first
+                ext_src.gsub!(src[0..-6], '')
+                dst = File.dirname(File.join(dst, ext_src))
+              end
+              Bundler.mkdir_p dst
+              Bundler.sudo "cp -R #{src} #{dst}" if Dir[src].any?
+            end
+
+            spec.executables.each do |exe|
+              Bundler.mkdir_p Bundler.system_bindir
+              Bundler.sudo "cp -R #{install_path}/bin/#{exe} #{Bundler.system_bindir}/"
+            end
+          end
+          installed_spec.loaded_from = loaded_from(spec)
         end
-        installed_spec.loaded_from = "#{Bundler.rubygems.gem_dir}/specifications/#{spec.full_name}.gemspec"
-        spec.loaded_from = "#{Bundler.rubygems.gem_dir}/specifications/#{spec.full_name}.gemspec"
+        spec.loaded_from = loaded_from(spec)
         ["Installing #{version_message(spec)}", spec.post_install_message]
+      ensure
+        if install_path && Bundler.requires_sudo?
+          FileUtils.remove_entry_secure(install_path)
+        end
       end
 
       def cache(spec, custom_path = nil)
-        cached_path = cached_gem(spec)
+        if builtin_gem?(spec)
+          cached_path = cached_built_in_gem(spec)
+        else
+          cached_path = cached_gem(spec)
+        end
         raise GemNotFound, "Missing gem file '#{spec.full_name}.gem'." unless cached_path
         return if File.dirname(cached_path) == Bundler.app_cache.to_s
         Bundler.ui.info "  * #{File.basename(cached_path)}"
         FileUtils.cp(cached_path, Bundler.app_cache(custom_path))
+      end
+
+      def cached_built_in_gem(spec)
+        cached_path = cached_path(spec)
+        if cached_path.nil?
+          remote_spec = remote_specs.search(spec).first
+          cached_path = fetch_gem(remote_spec)
+        end
+        cached_path
       end
 
       def add_remote(source)
@@ -139,15 +164,34 @@ module Bundler
         true
       end
 
+      def remotes_to_fetchers(remotes)
+        remotes.map do |uri|
+          case uri.scheme
+          when S3_SCHEME
+            Bundler::S3Fetcher.new(uri)
+          else
+            Bundler::Fetcher.new(uri)
+          end
+        end
+      end
+
     private
 
+      def loaded_from(spec)
+        "#{Bundler.rubygems.gem_dir}/specifications/#{spec.full_name}.gemspec"
+      end
+
       def cached_gem(spec)
-        possibilities = @caches.map { |p| "#{p}/#{spec.file_name}" }
-        cached_gem = possibilities.find { |p| File.exist?(p) }
+        cached_gem = cached_path(spec)
         unless cached_gem
           raise Bundler::GemNotFound, "Could not find #{spec.file_name} for installation"
         end
         cached_gem
+      end
+
+      def cached_path(spec)
+        possibilities = @caches.map { |p| "#{p}/#{spec.file_name}" }
+        possibilities.find { |p| File.exist?(p) }
       end
 
       def normalize_uri(uri)
@@ -156,6 +200,15 @@ module Bundler
         uri = URI(uri)
         raise ArgumentError, "The source must be an absolute URI" unless uri.absolute?
         uri
+      end
+
+      def suppress_configured_credentials(remote)
+        remote_nouser = remote.tap { |uri| uri.user = uri.password = nil }.to_s
+        if remote.userinfo && remote.userinfo == Bundler.settings[remote_nouser]
+          remote_nouser
+        else
+          remote
+        end
       end
 
       def fetch_specs
@@ -223,7 +276,7 @@ module Bundler
           old = Bundler.rubygems.sources
           idx = Index.new
 
-          fetchers       = remotes.map { |uri| Bundler::Fetcher.new(uri) }
+          fetchers       = remotes_to_fetchers(remotes)
           api_fetchers   = fetchers.select { |f| f.use_api }
           index_fetchers = fetchers - api_fetchers
 
@@ -276,16 +329,18 @@ module Bundler
         end
       end
 
-      def gem_dir_exists?(spec)
-        return true if spec.name == "bundler"
-        # Ruby 2 default gems
-        return true if spec.loaded_from.include?("specifications/default/")
-        # Ruby 1.9 default gems
+      def fetch_gem(spec)
+        return false unless spec.source_uri
+        Fetcher.download_gem_from_uri(spec, spec.source_uri)
+      end
+
+      def builtin_gem?(spec)
+        # Ruby 2.1, where all included gems have this summary
         return true if spec.summary =~ /is bundled with Ruby/
 
-        File.directory?(spec.full_gem_path)
+        # Ruby 2.0, where gemspecs are stored in specifications/default/
+        spec.loaded_from && spec.loaded_from.include?("specifications/default/")
       end
     end
-
   end
 end

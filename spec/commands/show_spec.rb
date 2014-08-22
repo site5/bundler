@@ -59,6 +59,13 @@ describe "bundle show" do
       gem_list = out.split.map { |p| p.split('/').last }
       expect(gem_list).to eq(gem_list.sort)
     end
+
+    it "prints summary of gems" do
+      bundle "show --verbose"
+
+      expect(out).to include(' - This is just a fake gem for testing')
+      expect(out).to include(' - Ruby based make-like utility.')
+    end
   end
 
   context "with a git repo in the Gemfile" do
@@ -102,6 +109,22 @@ describe "bundle show" do
     end
   end
 
+  context "with a svn repo in the Gemfile" do
+    before :each do
+      @svn = build_svn "foo", "1.0"
+    end
+
+    it "prints out svn info" do
+      install_gemfile <<-G
+        gem "foo", :svn => "file://#{lib_path('foo-1.0')}"
+      G
+      should_be_installed "foo 1.0"
+
+      bundle :show
+      expect(out).to include("foo (1.0 1")
+    end
+  end
+
   context "in a fresh gem in a blank git repo" do
     before :each do
       build_git "foo", :path => lib_path("foo")
@@ -113,6 +136,31 @@ describe "bundle show" do
     it "does not output git errors" do
       bundle :show
       expect(err).to be_empty
+    end
+  end
+
+  it "performs an automatic bundle install" do
+    gemfile <<-G
+      source "file://#{gem_repo1}"
+      gem "foo"
+    G
+
+    bundle "config auto_install 1"
+    bundle :show
+    expect(out).to include("Installing foo 1.0")
+  end
+
+  context "with an invalid regexp for gem name" do
+    it "does not find the gem" do
+      install_gemfile <<-G
+        source "file://#{gem_repo1}"
+        gem "rails"
+      G
+
+      invalid_regexp = '[]'
+
+      bundle "show #{invalid_regexp}"
+      expect(out).to include("Could not find gem '#{invalid_regexp}'.")
     end
   end
 end

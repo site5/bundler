@@ -34,12 +34,13 @@ module Bundler
         attr_accessor :path, :uri, :ref
         attr_writer :revision
 
-        def initialize(path, uri, ref, revision=nil, &allow)
+        def initialize(path, uri, ref, revision = nil, git = nil)
           @path     = path
           @uri      = uri
           @ref      = ref
           @revision = revision
-          @allow    = allow || Proc.new { true }
+          @git      = git
+          raise GitNotInstalledError.new if allow? && !Bundler.git_present?
         end
 
         def revision
@@ -64,14 +65,12 @@ module Bundler
             return if has_revision_cached?
             Bundler.ui.confirm "Updating #{uri}"
             in_path do
-              git %|fetch --force --quiet --tags #{uri_escaped} "refs/heads/*:refs/heads/*"|
+              git_retry %|fetch --force --quiet --tags #{uri_escaped} "refs/heads/*:refs/heads/*"|
             end
           else
             Bundler.ui.info "Fetching #{uri}"
             FileUtils.mkdir_p(path.dirname)
-            clone_command = %|clone #{uri_escaped} "#{path}" --bare --no-hardlinks|
-            clone_command = "#{clone_command} --quiet" if Bundler.ui.quiet?
-            git clone_command
+            git_retry %|clone #{uri_escaped} "#{path}" --bare --no-hardlinks --quiet|
           end
         end
 
@@ -79,16 +78,16 @@ module Bundler
           unless File.exist?(destination.join(".git"))
             FileUtils.mkdir_p(destination.dirname)
             FileUtils.rm_rf(destination)
-            git %|clone --no-checkout "#{path}" "#{destination}"|
+            git_retry %|clone --no-checkout --quiet "#{path}" "#{destination}"|
             File.chmod((0777 & ~File.umask), destination)
           end
 
           SharedHelpers.chdir(destination) do
-            git %|fetch --force --quiet --tags "#{path}"|
+            git_retry %|fetch --force --quiet --tags "#{path}"|
             git "reset --hard #{@revision}"
 
             if submodules
-              git "submodule update --init --recursive"
+              git_retry "submodule update --init --recursive"
             end
           end
         end
@@ -104,14 +103,17 @@ module Bundler
           git("#{command} 2>#{Bundler::NULL}", false)
         end
 
+        def git_retry(command)
+          Bundler::Retry.new("git #{command}", GitNotAllowedError).attempts do
+            git(command)
+          end
+        end
+
         def git(command, check_errors=true)
           raise GitNotAllowedError.new(command) unless allow?
-          raise GitNotInstalledError.new        unless Bundler.git_present?
-          Bundler::Retry.new("git #{command}").attempts do
-            out = SharedHelpers.with_clean_git_env { %x{git #{command}} }
-            raise GitCommandError.new(command, path) if check_errors && !$?.success?
-            out
-          end
+          out = SharedHelpers.with_clean_git_env { %x{git #{command}} }
+          raise GitCommandError.new(command, path) if check_errors && !$?.success?
+          out
         end
 
         def has_revision_cached?
@@ -136,7 +138,7 @@ module Bundler
         end
 
         def allow?
-          @allow.call
+          @git ? @git.allow_git_ops? : true
         end
 
         def in_path(&blk)
@@ -145,11 +147,8 @@ module Bundler
         end
 
         def allowed_in_path
-          if allow?
-            in_path { yield }
-          else
-            raise GitError, "The git source #{uri} is not yet checked out. Please run `bundle install` before trying to start your application"
-          end
+          return in_path { yield } if allow?
+          raise GitError, "The git source #{uri} is not yet checked out. Please run `bundle install` before trying to start your application"
         end
 
       end

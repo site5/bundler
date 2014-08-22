@@ -2,7 +2,7 @@ require 'spec_helper'
 
 describe Bundler::Source::Rubygems do
   before do
-    Bundler.stub(:root){ Pathname.new("root") }
+    allow(Bundler).to receive(:root){ Pathname.new("root") }
   end
 
   describe "caches" do
@@ -20,6 +20,15 @@ describe Bundler::Source::Rubygems do
       subject.caches.each do |cache|
         expect([String, Pathname]).to include(cache.class)
       end
+    end
+  end
+
+  describe "remotes_to_fetchers" do
+    it "turns s3 paths into S3Fetcher objects and other paths into Fetcher objects" do
+      result = subject.remotes_to_fetchers([URI("s3://foo"),
+                                            URI("http://foo")])
+      expect(result.first).to be_an_instance_of Bundler::S3Fetcher
+      expect(result.last).to be_an_instance_of Bundler::Fetcher
     end
   end
 end

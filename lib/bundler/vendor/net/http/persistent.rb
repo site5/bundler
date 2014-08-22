@@ -203,7 +203,7 @@ class Net::HTTP::Persistent
   ##
   # The version of Net::HTTP::Persistent you are using
 
-  VERSION = '2.9'
+  VERSION = '2.9.3'
 
   ##
   # Exceptions rescued for automatic retry on ruby 2.0.0.  This overlaps with
@@ -241,7 +241,7 @@ class Net::HTTP::Persistent
   # NOTE:  This may not work on ruby > 1.9.
 
   def self.detect_idle_timeout uri, max = 10
-    uri = URI uri unless URI::Generic === uri
+    uri = URI uri unless uri.is_a?(URI::Generic)
     uri += '/'
 
     req = Net::HTTP::Head.new uri.request_uri
@@ -257,7 +257,7 @@ class Net::HTTP::Persistent
 
       $stderr.puts "HEAD #{uri} => #{response.code}" if $DEBUG
 
-      unless Net::HTTPOK === response then
+      unless response.is_a?(Net::HTTPOK) then
         raise Error, "bad response code #{response.code} detecting idle timeout"
       end
 
@@ -631,6 +631,7 @@ class Net::HTTP::Persistent
     start connection unless connection.started?
 
     connection.read_timeout = @read_timeout if @read_timeout
+    connection.keep_alive_timeout = @idle_timeout if @idle_timeout && connection.respond_to?(:keep_alive_timeout=)
 
     connection
   rescue Errno::ECONNREFUSED
@@ -665,6 +666,14 @@ class Net::HTTP::Persistent
   def escape str
     CGI.escape str if str
   end
+
+  ##
+  # URI::unescape wrapper
+
+  def unescape str
+    CGI.unescape str if str
+  end
+
 
   ##
   # Returns true if the connection should be reset due to an idle timeout, or
@@ -858,8 +867,8 @@ class Net::HTTP::Persistent
       @proxy_args = [
         @proxy_uri.host,
         @proxy_uri.port,
-        @proxy_uri.user,
-        @proxy_uri.password,
+        unescape(@proxy_uri.user),
+        unescape(@proxy_uri.password),
       ]
 
       @proxy_connection_id = [nil, *@proxy_args].join ':'
@@ -955,9 +964,13 @@ class Net::HTTP::Persistent
 
     start connection
   rescue Errno::ECONNREFUSED
-    raise Error, "connection refused: #{connection.address}:#{connection.port}"
+    e = Error.new "connection refused: #{connection.address}:#{connection.port}"
+    e.set_backtrace $@
+    raise e
   rescue Errno::EHOSTDOWN
-    raise Error, "host down: #{connection.address}:#{connection.port}"
+    e = Error.new "host down: #{connection.address}:#{connection.port}"
+    e.set_backtrace $@
+    raise e
   end
 
   ##
@@ -1052,7 +1065,7 @@ class Net::HTTP::Persistent
   # Returns the request.
 
   def request_setup req_or_uri # :nodoc:
-    req = if URI === req_or_uri then
+    req = if req_or_uri.is_a?(URI) then
             Net::HTTP::Get.new req_or_uri.request_uri
           else
             req_or_uri

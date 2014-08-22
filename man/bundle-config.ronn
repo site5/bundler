@@ -77,7 +77,7 @@ learn more about their operation in [bundle install(1)][bundle-install].
 
 * `path` (`BUNDLE_PATH`):
   The location on disk to install gems. Defaults to `$GEM_HOME` in development
-  and `vendor/bundler` when `--deployment` is used
+  and `vendor/bundle` when `--deployment` is used
 * `frozen` (`BUNDLE_FROZEN`):
   Disallow changes to the `Gemfile`. Defaults to `true` when `--deployment`
   is used.
@@ -86,12 +86,6 @@ learn more about their operation in [bundle install(1)][bundle-install].
 * `bin` (`BUNDLE_BIN`):
   Install executables from gems in the bundle to the specified directory.
   Defaults to `false`.
-* `gemfile` (`BUNDLE_GEMFILE`):
-  The name of the file that bundler should use as the `Gemfile`. This location
-  of this file also sets the root of the project, which is used to resolve
-  relative paths in the `Gemfile`, among other things. By default, bundler
-  will search up from the current working directory until it finds a
-  `Gemfile`.
 * `ssl_ca_cert` (`BUNDLE_SSL_CA_CERT`):
   Path to a designated CA certificate file or folder containing multiple
   certificates for trusted CAs in PEM format.
@@ -105,6 +99,18 @@ flag to the [bundle install(1)][bundle-install] command.
 You can set them globally either via environment variables or `bundle config`,
 whichever is preferable for your setup. If you use both, environment variables
 will take preference over global settings.
+
+An additional setting is available only as an environment variable:
+
+* `BUNDLE_GEMFILE`:
+  The name of the file that bundler should use as the `Gemfile`. This location
+  of this file also sets the root of the project, which is used to resolve
+  relative paths in the `Gemfile`, among other things. By default, bundler
+  will search up from the current working directory until it finds a
+  `Gemfile`.
+
+Bundler will ignore any `BUNDLE_GEMFILE` entries in local or global
+configuration files.
 
 ## LOCAL GIT REPOS
 
@@ -139,11 +145,26 @@ Finally, Bundler also ensures that the current revision in the
 `Gemfile.lock` exists in the local git repository. By doing this, Bundler
 forces you to fetch the latest changes in the remotes.
 
-## MIRRORS OF GEM REPOSITORIES
+## MIRRORS OF GEM SOURCES
 
 Bundler supports overriding gem sources with mirrors. This allows you to
 configure rubygems.org as the gem source in your Gemfile while still using your
 mirror to fetch gems.
 
+    bundle config mirror.SOURCE_URL MIRROR_URL
+
+For example, to use a mirror of rubygems.org hosted at
+
     bundle config mirror.http://rubygems.org http://rubygems-mirror.org
 
+## CREDENTIALS FOR GEM SOURCES
+
+Bundler allows you to configure credentials for any gem source, which allows
+you to avoid putting secrets into your Gemfile.
+
+    bundle config SOURCE_URL USERNAME:PASSWORD
+
+For example, to save the credentials of user `claudette` for the gem source at
+`gems.longerous.com`, you would run:
+
+    bundle config https://gems.longerous.com/ claudette:s00pers3krit

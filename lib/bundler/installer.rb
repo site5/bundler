@@ -1,6 +1,6 @@
 require 'erb'
 require 'rubygems/dependency_installer'
-require 'bundler/parallel_workers'
+require 'bundler/worker'
 
 module Bundler
   class Installer < Environment
@@ -48,13 +48,7 @@ module Bundler
     #
     # Finally: TODO add documentation for how the standalone process works.
     def run(options)
-      # Create the BUNDLE_PATH directory
-      begin
-        Bundler.bundle_path.mkpath unless Bundler.bundle_path.exist?
-      rescue Errno::EEXIST
-        raise PathError, "Could not install to path `#{Bundler.settings[:path]}` " +
-          "because of an invalid symlink. Remove the symlink so the directory can be created."
-      end
+      create_bundle_path
 
       if Bundler.settings[:frozen]
         @definition.ensure_equivalent_gemfile_and_lockfile(options[:deployment])
@@ -91,13 +85,13 @@ module Bundler
       # that said, it's a rare situation (other than rake), and parallel
       # installation is just SO MUCH FASTER. so we let people opt in.
       jobs = [Bundler.settings[:jobs].to_i-1, 1].max
-      if jobs > 1 && can_install_parallely?
+      if jobs > 1 && can_install_in_parallel?
         install_in_parallel jobs, options[:standalone]
       else
         install_sequentially options[:standalone]
       end
 
-      lock
+      lock unless Bundler.settings[:frozen]
       generate_standalone(options[:standalone]) if options[:standalone]
     end
 
@@ -124,7 +118,6 @@ module Bundler
         generate_bundler_executable_stubs(spec, :force => true)
       end
 
-      FileUtils.rm_rf(Bundler.tmp)
       post_install_message
     rescue Exception => e
       # if install hook failed or gem signature is bad, just die
@@ -172,7 +165,7 @@ module Bundler
         next if executable == "bundle"
 
         binstub_path = "#{bin_path}/#{executable}"
-        if File.exists?(binstub_path) && !options[:force]
+        if File.exist?(binstub_path) && !options[:force]
           exists << executable
           next
         end
@@ -199,7 +192,7 @@ module Bundler
 
   private
 
-    def can_install_parallely?
+    def can_install_in_parallel?
       min_rubygems = "2.0.7"
       if Bundler.current_ruby.mri? || Bundler.rubygems.provides?(">= #{min_rubygems}")
         true
@@ -242,6 +235,7 @@ module Bundler
 
       specs.each do |spec|
         next if spec.name == "bundler"
+        next if spec.require_paths.nil? # builtin gems
 
         spec.require_paths.each do |path|
           full_path = File.join(spec.full_gem_path, path)
@@ -258,7 +252,7 @@ module Bundler
         file.puts "ruby_version = RbConfig::CONFIG[\"ruby_version\"]"
         file.puts "path = File.expand_path('..', __FILE__)"
         paths.each do |path|
-          file.puts %{$:.unshift File.expand_path("\#{path}/#{path}")}
+          file.puts %{$:.unshift "\#{path}/#{path}"}
         end
       end
     end
@@ -281,9 +275,9 @@ module Bundler
         remains[spec.name] = true
       end
 
-      worker_pool = ParallelWorkers.worker_pool size, lambda { |name, worker|
+      worker_pool = Worker.new size, lambda { |name, worker_num|
         spec = name2spec[name]
-        message = install_gem_from_spec spec, standalone, worker
+        message = install_gem_from_spec spec, standalone, worker_num
         { :name => spec.name, :post_install => message }
       }
 
@@ -326,5 +320,13 @@ module Bundler
         remains[dep.name]
       end
     end
+
+    def create_bundle_path
+      Bundler.mkdir_p(Bundler.bundle_path.to_s) unless Bundler.bundle_path.exist?
+    rescue Errno::EEXIST
+      raise PathError, "Could not install to path `#{Bundler.settings[:path]}` " +
+        "because of an invalid symlink. Remove the symlink so the directory can be created."
+    end
+
   end
 end

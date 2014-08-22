@@ -65,6 +65,7 @@ describe Bundler::GemHelper do
 
     before(:each) do
       content = app_gemspec_content.gsub("TODO: ", "")
+      content.sub!(/homepage\s+= ".*"/, 'homepage = ""')
       File.open(app_gemspec_path, "w") { |file| file << content }
     end
 
@@ -84,7 +85,8 @@ describe Bundler::GemHelper do
       end
 
       context "defines Rake tasks" do
-        let(:task_names) { %w[build install release] }
+        let(:task_names) { %w[build install release
+          release:guard_clean release:source_control_push release:rubygem_push] }
 
         context "before installation" do
           it "raises an error with appropriate message" do
@@ -133,21 +135,6 @@ describe Bundler::GemHelper do
     end
 
     describe "#install_gem" do
-      context "when installation failed" do
-        before do
-          # create empty gem file in order to simulate install failure
-          subject.stub(:build_gem) do
-            FileUtils.mkdir_p(app_gem_dir)
-            FileUtils.touch app_gem_path
-            app_gem_path
-          end
-        end
-
-        it "raises an error with appropriate message" do
-          expect { subject.install_gem }.to raise_error(/Couldn't install gem/)
-        end
-      end
-
       context "when installation was successful" do
         it "gem is installed" do
           mock_build_message app_name, app_version
@@ -157,33 +144,60 @@ describe Bundler::GemHelper do
           expect(`gem list`).to include("#{app_name} (#{app_version})")
         end
       end
+
+      context "when installation fails" do
+        it "raises an error with appropriate message" do
+          # create empty gem file in order to simulate install failure
+          allow(subject).to receive(:build_gem) do
+            FileUtils.mkdir_p(app_gem_dir)
+            FileUtils.touch app_gem_path
+            app_gem_path
+          end
+          expect { subject.install_gem }.to raise_error(/Couldn't install gem/)
+        end
+      end
     end
 
-    describe "#release_gem" do
+    describe "rake release" do
+      let!(:rake_application) { Rake.application }
+
+      before(:each) do
+        Rake.application = Rake::Application.new
+        subject.install
+      end
+
+      after(:each) do
+        Rake.application = rake_application
+      end
+
       before do
         Dir.chdir(app_path) do
           `git init`
           `git config user.email "you@example.com"`
           `git config user.name "name"`
+          `git config push.default simple`
         end
       end
 
       context "fails" do
         it "when there are unstaged files" do
-          expect { subject.release_gem }.
+          expect { Rake.application["release"].invoke }.
             to raise_error("There are files that need to be committed first.")
         end
 
         it "when there are uncommitted files" do
           Dir.chdir(app_path) { `git add .` }
-          expect { subject.release_gem }.
+          expect { Rake.application["release"].invoke }.
             to raise_error("There are files that need to be committed first.")
         end
 
         it "when there is no git remote" do
-          Bundler.ui.stub(:confirm => nil, :error => nil) # silence messages
+          # silence messages
+          allow(Bundler.ui).to receive(:confirm)
+          allow(Bundler.ui).to receive(:error)
+
           Dir.chdir(app_path) { `git commit -a -m "initial commit"` }
-          expect { subject.release_gem }.to raise_error
+          expect { Rake.application["release"].invoke }.to raise_error
         end
       end
 
@@ -202,9 +216,9 @@ describe Bundler::GemHelper do
           mock_confirm_message "Pushed git commits and tags."
           expect(subject).to receive(:rubygem_push).with(app_gem_path.to_s)
 
-          Dir.chdir(app_path) { sys_exec("git push origin master", true) }
+          Dir.chdir(app_path) { sys_exec("git push -u origin master", true) }
 
-          subject.release_gem
+          Rake.application["release"].invoke
         end
 
         it "even if tag already exists" do
@@ -216,7 +230,7 @@ describe Bundler::GemHelper do
             `git tag -a -m \"Version #{app_version}\" v#{app_version}`
           end
 
-          subject.release_gem
+          Rake.application["release"].invoke
         end
       end
     end

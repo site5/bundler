@@ -61,6 +61,21 @@ describe "bundle binstubs <gem>" do
       expect(out).to eq("Sorry, Bundler can only be run via Rubygems.")
     end
 
+    it "installs binstubs from svn gems" do
+      FileUtils.mkdir_p(lib_path("foo/bin"))
+      FileUtils.touch(lib_path("foo/bin/foo"))
+      build_svn "foo", "1.0", :path => lib_path("foo") do |s|
+        s.executables = %w(foo)
+      end
+      install_gemfile <<-G
+        gem "foo", :svn => "file://#{lib_path('foo')}"
+      G
+
+      bundle "binstubs foo"
+
+      expect(bundled_app("bin/foo")).to exist
+    end
+
     it "installs binstubs from git gems" do
       FileUtils.mkdir_p(lib_path("foo/bin"))
       FileUtils.touch(lib_path("foo/bin/foo"))
@@ -102,6 +117,19 @@ describe "bundle binstubs <gem>" do
         binary = bundled_app("bin/rackup")
         expect(File.stat(binary).mode.to_s(8)).to eq("100775")
       end
+    end
+  end
+
+  context "when the gem doesn't exist" do
+    it "displays an error with correct status" do
+      install_gemfile <<-G
+        source "file://#{gem_repo1}"
+      G
+
+      bundle "binstubs doesnt_exist", :exitstatus => true
+
+      expect(exitstatus).to eq(7)
+      expect(out).to eq("Could not find gem 'doesnt_exist'.")
     end
   end
 
@@ -201,6 +229,31 @@ describe "bundle binstubs <gem>" do
 
       bundle "binstubs with_development_dependency"
       expect(out).to include('no executables for the gem with_development_dependency')
+    end
+  end
+
+  context "when BUNDLE_INSTALL is specified" do
+    it "performs an automatic bundle install" do
+      gemfile <<-G
+        source "file://#{gem_repo1}"
+        gem "rack"
+      G
+
+      bundle "config auto_install 1"
+      bundle "binstubs rack"
+      expect(out).to include('Installing rack 1.0.0')
+      should_be_installed "rack 1.0.0"
+    end
+
+    it "does nothing when already up to date" do
+      install_gemfile <<-G
+        source "file://#{gem_repo1}"
+        gem "rack"
+      G
+
+      bundle "config auto_install 1"
+      bundle "binstubs rack", :env => { "BUNDLE_INSTALL" => 1 }
+      expect(out).not_to include('Installing rack 1.0.0')
     end
   end
 end

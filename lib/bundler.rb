@@ -37,6 +37,7 @@ module Bundler
   autoload :RubyVersion,           'bundler/ruby_version'
   autoload :RubyDsl,               'bundler/ruby_dsl'
   autoload :Runtime,               'bundler/runtime'
+  autoload :S3Fetcher,             'bundler/s3_fetcher'
   autoload :Settings,              'bundler/settings'
   autoload :SharedHelpers,         'bundler/shared_helpers'
   autoload :SpecSet,               'bundler/spec_set'
@@ -58,6 +59,7 @@ module Bundler
   class InstallHookError      < BundlerError; status_code(8)  ; end
   class PathError             < BundlerError; status_code(13) ; end
   class GitError              < BundlerError; status_code(11) ; end
+  class SVNError              < BundlerError; status_code(23) ; end
   class DeprecatedError       < BundlerError; status_code(12) ; end
   class GemspecError          < BundlerError; status_code(14) ; end
   class InvalidOption         < BundlerError; status_code(15) ; end
@@ -158,14 +160,14 @@ module Bundler
       return @locked_gems if defined?(@locked_gems)
       if Bundler.default_lockfile.exist?
         lock = Bundler.read_file(Bundler.default_lockfile)
-        @lock_gems = LockfileParser.new(lock)
+        @locked_gems = LockfileParser.new(lock)
       else
         @locked_gems = nil
       end
     end
 
     def ruby_scope
-      "#{Bundler.rubygems.ruby_engine}/#{Gem::ConfigMap[:ruby_version]}"
+      "#{Bundler.rubygems.ruby_engine}/#{Bundler.rubygems.config_map[:ruby_version]}"
     end
 
     def user_bundle_path
@@ -189,7 +191,7 @@ module Bundler
     end
 
     def root
-      default_gemfile.dirname.expand_path
+      @root ||= default_gemfile.dirname.expand_path
     end
 
     def app_config_path
@@ -203,8 +205,9 @@ module Bundler
       path.join("vendor/cache")
     end
 
-    def tmp
-      user_bundle_path.join("tmp", Process.pid.to_s)
+    def tmp(name = Process.pid.to_s)
+      @tmp ||= Pathname.new Dir.mktmpdir("bundler")
+      @tmp.join(name)
     end
 
     def settings
@@ -278,8 +281,8 @@ module Bundler
         bin_dir = bin_dir.parent until bin_dir.exist?
 
         # if any directory is not writable, we need sudo
-        dirs = [path, bin_dir] | Dir[path.join('*').to_s]
-        sudo_needed = dirs.find{|d| !File.writable?(d) }
+        files = [path, bin_dir] | Dir[path.join('build_info/*').to_s] | Dir[path.join('*').to_s]
+        sudo_needed = files.any?{|f| !File.writable?(f) }
       end
 
       @requires_sudo_ran = true
@@ -363,8 +366,17 @@ module Bundler
       @git_present = Bundler.which("git") || Bundler.which("git.exe")
     end
 
+    def svn_present?
+      return @svn_present if defined?(@svn_present)
+      @svn_present = Bundler.which("svn") || Bundler.which("svn.exe")
+    end
+
     def ruby_version
       @ruby_version ||= SystemRubyVersion.new
+    end
+
+    def reset!
+      @definition = nil
     end
 
   private

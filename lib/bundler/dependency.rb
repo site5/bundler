@@ -24,6 +24,14 @@ module Bundler
       :jruby_18 => Gem::Platform::JAVA,
       :jruby_19 => Gem::Platform::JAVA,
       :mswin    => Gem::Platform::MSWIN,
+      :mswin_18 => Gem::Platform::MSWIN,
+      :mswin_19 => Gem::Platform::MSWIN,
+      :mswin_20 => Gem::Platform::MSWIN,
+      :mswin_21 => Gem::Platform::MSWIN,
+      :mswin64    => Gem::Platform::MSWIN64,
+      :mswin64_19 => Gem::Platform::MSWIN64,
+      :mswin64_20 => Gem::Platform::MSWIN64,
+      :mswin64_21 => Gem::Platform::MSWIN64,
       :mingw    => Gem::Platform::MINGW,
       :mingw_18 => Gem::Platform::MINGW,
       :mingw_19 => Gem::Platform::MINGW,
@@ -67,9 +75,9 @@ module Bundler
 
     def current_env?
       return true unless @env
-      if Hash === @env
+      if @env.is_a?(Hash)
         @env.all? do |key, val|
-          ENV[key.to_s] && (String === val ? ENV[key.to_s] == val : ENV[key.to_s] =~ val)
+          ENV[key.to_s] && (val.is_a?(String) ? ENV[key.to_s] == val : ENV[key.to_s] =~ val)
         end
       else
         ENV[@env.to_s]
@@ -88,7 +96,6 @@ module Bundler
       out << '!' if source
       out << "\n"
     end
-
 
     def specific?
       super

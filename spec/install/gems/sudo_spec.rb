@@ -40,13 +40,13 @@ describe "when using sudo", :sudo => true do
     end
 
     it "installs rake and a gem dependent on rake in the same session" do
-        gemfile <<-G
-            source "file://#{gem_repo1}"
-            gem "rake"
-            gem "another_implicit_rake_dep"
-          G
-         bundle "install"
-         expect(system_gem_path("gems/another_implicit_rake_dep-1.0")).to exist
+      gemfile <<-G
+          source "file://#{gem_repo1}"
+          gem "rake"
+          gem "another_implicit_rake_dep"
+      G
+      bundle "install"
+      expect(system_gem_path("gems/another_implicit_rake_dep-1.0")).to exist
     end
 
 
@@ -66,7 +66,33 @@ describe "when using sudo", :sudo => true do
       should_be_installed "rack 1.0"
     end
 
-    it "installs when BUNDLE_PATH does not exist"
+    it "installs when BUNDLE_PATH does not exist" do
+      root_path = tmp("owned_by_root")
+      FileUtils.mkdir_p root_path
+      sudo "chown -R root #{root_path}"
+      bundle_path = root_path.join("does_not_exist")
+
+      ENV['BUNDLE_PATH'] = bundle_path.to_s
+      install_gemfile <<-G
+        source "file://#{gem_repo1}"
+        gem "rack", '1.0'
+      G
+
+      expect(bundle_path.join("gems/rack-1.0.0")).to exist
+      expect(bundle_path.join("gems/rack-1.0.0").stat.uid).to eq(0)
+      should_be_installed "rack 1.0"
+    end
+
+    it "installs extensions/ compiled by Rubygems 2.2", :rubygems => "2.2" do
+      install_gemfile <<-G
+        source "file://#{gem_repo1}"
+        gem "very_simple_binary"
+      G
+
+      expect(system_gem_path("gems/very_simple_binary-1.0")).to exist
+      binary_glob = system_gem_path("extensions/*/*/very_simple_binary-1.0")
+      expect(Dir.glob(binary_glob).first).to be
+    end
   end
 
   describe "and BUNDLE_PATH is not writable" do
@@ -96,6 +122,14 @@ describe "when using sudo", :sudo => true do
       bundle :install, :env => {'GEM_HOME' => gem_home.to_s, 'GEM_PATH' => nil}
       expect(gem_home.join('bin/rackup')).to exist
       should_be_installed "rack 1.0", :env => {'GEM_HOME' => gem_home.to_s, 'GEM_PATH' => nil}
+    end
+  end
+
+  describe "and root runs install" do
+    it "warns against that" do
+      gemfile %|source "file://#{gem_repo1}"|
+      bundle :install, :sudo => true
+      expect(out).to include("Don't run Bundler as root.")
     end
   end
 
